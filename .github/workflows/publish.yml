@@ -1,0 +1,52 @@
+name: Publish backup-sys image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build Linux release binaries
+        run: |
+          mkdir -p dist/amd64 dist/arm64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o dist/amd64/backup-sys .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o dist/arm64/backup-sys .
+          tar -C dist/amd64 -czf dist/backup-sys-linux-amd64.tar.gz backup-sys
+          tar -C dist/arm64 -czf dist/backup-sys-linux-arm64.tar.gz backup-sys
+          (cd dist && sha256sum backup-sys-linux-*.tar.gz > checksums.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backup-sys-linux-binaries
+          path: |
+            dist/backup-sys-linux-*.tar.gz
+            dist/checksums.txt
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: metadata
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=match,pattern=v(.*),group=1
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
